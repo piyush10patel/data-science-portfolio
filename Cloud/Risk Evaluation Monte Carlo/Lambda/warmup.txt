@@ -1,0 +1,63 @@
+import json
+import boto3
+
+def either_caller( event ): 
+    body=""
+    try: # if called by function URL and possibly also HTTP API
+        body = json.loads(event['body']) 
+    except KeyError: # if called by Test in Lambda or via API Gateway
+        body = event # dict
+    return body
+    
+
+def lambda_handler(event, context):
+    body=either_caller( event )
+    r=body['Key1']['r']
+    r=int(r)
+    s=body['Key1']['s']
+    
+    body_json = json.dumps(body).encode('utf-8')
+    if s=='lambda':
+        try:
+            s3_client.put_object(Body=body_json, Bucket='warmupdumps', Key='warmup.json')
+            return {'result':'Ok'}
+        except Exception as e:
+            return {'result':'not ok'}
+    if s=='ec2':
+        s3_client = boto3.client('s3')
+        s3_client.put_object(Body=body_json, Bucket='warmupdumps', Key='warmup.json')
+        ec2 = boto3.resource('ec2', region_name='us-east-1')
+        user_data="""#!/bin/bash
+        apt update -y
+        apt install python3 apache2 -y
+        apt install python3-pandas
+        apache2ctl restart
+        wget https://lateral-journey-377016.nw.r.appspot.com/cacheavoid/apache2.conf -P /var/www/html  #apache config files
+        wget https://lateral-journey-377016.nw.r.appspot.com/cacheavoid/getsignals.py -P /var/www/html
+        chmod 755 /var/www/html/apache2.confi
+        chmod 755 /var/www/html/getsignals.py
+        a2enmod cgi
+        service apache2 restart
+        system ctl restart apache2"""
+        instances=ec2.create_instances(ImageId='ami-0aa22f55a194684fa', InstanceType='t2.micro', MinCount=r, MaxCount=r,UserData=user_data,SecurityGroups=['SSH'])
+        
+        instanceslist=[]
+        
+        for i in instances:
+            i.wait_until_running()
+            i.load()
+            
+            
+        instanceslist = [i.public_dns_name for i in instances]
+        s3_client = boto3.client('s3')
+        body['dns_address']=instanceslist
+        body_json=json.dumps(body)
+     
+        
+        if len(instanceslist)==r:
+            return {'results':'ok'}
+        
+        else:
+            return {'result':'not Ok'}
+    else:
+        return {'result':'not Ok'}

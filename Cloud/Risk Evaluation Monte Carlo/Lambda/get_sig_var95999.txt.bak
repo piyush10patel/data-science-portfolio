@@ -1,0 +1,138 @@
+import json
+import boto3
+import pandas as pd
+import math
+import random
+import csv
+import logging
+import requests
+
+def either_caller( event ): 
+    body=""
+    try: # if called by function URL and possibly also HTTP API
+        body = json.loads(event['body']) 
+    except KeyError: # if called by Test in Lambda or via API Gateway
+        body = event # dict
+    return body
+    
+
+def lambda_handler(event, context):
+    body=either_caller( event )
+    
+    s3_client = boto3.client('s3')
+    response_analyse = s3_client.get_object(Bucket='analysedumps', Key='analyse.json')
+    content =response_analyse['Body'].read().decode('utf-8')
+    analyse_dict=json.loads(content)
+    
+    
+    response_warmup = s3_client.get_object(Bucket='warmupdumps', Key='warmup.json')
+    c = response_warmup['Body'].read().decode('utf-8')
+    warmup_dict=json.loads(c)
+    
+    response = s3_client.get_object(Bucket='data-dumps-new', Key='data.json')
+    data = response['Body'].read().decode('utf-8')
+    data_dict=json.loads(data)
+    
+    
+    r=warmup_dict['Key1']['r']
+    r=int(r)
+    s=warmup_dict['Key1']['s']
+    h=analyse_dict['Key1']['h']
+    d=analyse_dict['Key1']['d']
+    t=analyse_dict['Key1']['t']
+    p=analyse_dict['Key1']['p']
+    data=data_dict['Key1']['Data']
+    
+    if s=='lambda':
+        if(t=='sell'):
+            res=sellSimResults(data,d,h)
+        else:
+            res=buySimResults(data,d,h)
+        
+        
+        
+        s3_client = boto3.client('s3')
+        s3_client.put_object(Body=json.dumps(res), Bucket='analysedumps', Key='time.json')
+        return res
+    
+    else:
+        #get dns and ip of instances
+        ec2_client = boto3.client('ec2', region_name='us-east-1')
+        
+        instance_dns=warmup_dict['dns_address']
+        
+        
+        #render the url
+        headers={"Content-Type": "application/json"}
+        dnsstr=str(instance_dns[0])
+        url=f'http://{dnsstr}/getsignals.py'
+        payload={'s':s,'r':r,'h':h,'d':d,'t':t,'p':p,'data':data}
+        response=requests.post(url,data=payload,headers=headers,timeout=350)
+        
+        
+        #s3_client = boto3.client('s3')
+        #s3_client.put_object(Body=json.dumps(res), Bucket='analysedumps', Key='time.json')
+        return response.text
+    #return {'var95':res['var95'],'var99':res['var99'],'Date':res['Date']}
+
+
+def buySimResults(data,shots,history):
+    var95list=[]
+    var99list=[]
+    closing=[]
+    tradedate=[]
+    data=pd.DataFrame(data)
+    return_data_dict={}
+    shots=int(shots)
+    history=int(history)
+    for i in range(history, len(data)):
+        if data.Buy[i]==1:
+            mean=data.Close[i-history:i].pct_change(1).mean()
+            std=data.Close[i-history:i].pct_change(1).std()
+            simulated = [random.gauss(mean,std) for x in range(shots)]
+            simulated.sort(reverse=True)
+            var95 = simulated[int(len(simulated)*0.95)]
+            var99 = simulated[int(len(simulated)*0.99)]
+            var95list.append(var95)
+            var99list.append(var99)
+            closing.append(data.Close[i])
+            tradedate.append(data.Date[i])
+            
+    return_data_dict['var95']=var95list
+    return_data_dict['var99']=var99list
+    return_data_dict['Close']=closing
+    return_data_dict['Date']=tradedate
+   
+    return return_data_dict
+    
+    
+    
+def sellSimResults(data,shots,history):
+    var95list=[]
+    var99list=[]
+    closing=[]
+    tradedate=[]
+    data=pd.DataFrame(data)
+    
+    return_data_dict={}
+    shots=int(shots)
+    history=int(history)
+    for i in range(history, len(data)):
+        if data.Sell[i]==1:
+            mean=data.Close[i-history:i].pct_change(1).mean()
+            std=data.Close[i-history:i].pct_change(1).std()
+            simulated = [random.gauss(mean,std) for x in range(shots)]
+            simulated.sort(reverse=True)
+            var95 = simulated[int(len(simulated)*0.95)]
+            var99 = simulated[int(len(simulated)*0.99)]
+            var95list.append(var95)
+            var99list.append(var99)
+            closing.append(data.Close[i])
+            tradedate.append(data.Date[i])
+            
+    return_data_dict['var95']=var95list
+    return_data_dict['var99']=var99list
+    return_data_dict['Close']=closing
+    return_data_dict['Date']=tradedate
+   
+    return return_data_dict

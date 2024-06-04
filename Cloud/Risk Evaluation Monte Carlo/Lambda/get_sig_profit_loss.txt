@@ -1,0 +1,145 @@
+import json
+import boto3
+import pandas as pd
+import math
+import random
+
+def either_caller( event ): 
+    body=""
+    try: # if called by function URL and possibly also HTTP API
+        body = json.loads(event['body']) 
+    except KeyError: # if called by Test in Lambda or via API Gateway
+        body = event # dict
+    return body
+    
+
+def lambda_handler(event, context):
+    body = either_caller(event)
+
+    s3_client = boto3.client('s3')
+
+    response = s3_client.get_object(Bucket='data-dumps-new', Key='data.json')
+    data = response['Body'].read().decode('utf-8')
+    data_dict = json.loads(data)
+
+    response_analyse = s3_client.get_object(Bucket='analysedumps', Key='analyse.json')
+    content = response_analyse['Body'].read().decode('utf-8')
+    analyse_dict = json.loads(content)
+
+    response_warmup = s3_client.get_object(Bucket='warmupdumps', Key='warmup.json')
+    c = response_warmup['Body'].read().decode('utf-8')
+    warmup_dict = json.loads(c)
+
+    data_list = data_dict["Key1"]['Data']
+    most_recent_entry = max(data_list, key=lambda x: x["Date"])
+    today_closing_price = most_recent_entry["Close"]  # since the forecasting price is not available so using Today's price as forecasted price for getting profit and loss
+
+    h = analyse_dict['Key1']['h']
+    d = analyse_dict['Key1']['d']
+    t = analyse_dict['Key1']['t']
+    p = analyse_dict['Key1']['p']
+    data = data_dict['Key1']['Data']
+
+    if warmup_dict['Key1']['s'] == "lambda":
+        if t == 'sell':
+            res = sellSimResults(data, d, h, p)
+        else:
+            res = buySimResults(data, d, h, p)
+        
+        tmpdate = res['ShiftedDate']
+        data = pd.DataFrame(data)
+        
+        
+        
+        
+        data['Date'] = pd.to_datetime(data['Date'])
+        merged_data = data.merge(res, left_on='Date', right_on='ShiftedDate', how='inner')
+        filtered_close = merged_data['Close_x']
+        diff = round(merged_data['Close_x'] - merged_data['Close_y'],2)
+        
+        return diff.head(20).tolist()
+    else:
+        pass
+
+    
+def buySimResults(data,shots,history,days):
+    var95list=[]
+    var99list=[]
+    closing=[]
+    tradedate=[]
+    data=pd.DataFrame(data)
+    return_data_dict={}
+    shots=int(shots)
+    history=int(history)
+    profit=int(days)
+    for i in range(history, len(data)):
+        if data.Buy[i]==1:
+            mean=data.Close[i-history:i].pct_change(1).mean()
+            std=data.Close[i-history:i].pct_change(1).std()
+            simulated = [random.gauss(mean,std) for x in range(shots)]
+            simulated.sort(reverse=True)
+            var95 = simulated[int(len(simulated)*0.95)]
+            var99 = simulated[int(len(simulated)*0.99)]
+            var95list.append(var95)
+            var99list.append(var99)
+            closing.append(data.Close[i])
+            tradedate.append(data.Date[i])
+            
+    return_data_dict['var95']=var95list
+    return_data_dict['var99']=var99list
+    return_data_dict['Close']=closing
+    return_data_dict['Date']=tradedate
+    
+    sorted_data=pd.DataFrame(return_data_dict)
+    sorted_data['Date'] = pd.to_datetime(sorted_data['Date'])
+    sorted_data.sort_values(by='Date', ascending = True, inplace = True)
+    sorted_data['ShiftedDate']=sorted_data['Date']+pd.Timedelta(days=profit)
+    #lim_data = lim_data.iloc[:, :3]
+    #lim_data=lim_data.to_dict('list')
+    
+    
+    #df=json.dumps(df)
+    return sorted_data
+    
+    
+    
+    
+def sellSimResults(data,shots,history,days):
+    var95list=[]
+    var99list=[]
+    closing=[]
+    tradedate=[]
+    data=pd.DataFrame(data)
+    
+    return_data_dict={}
+    shots=int(shots)
+    history=int(history)
+    profit=int(days)
+    for i in range(history, len(data)):
+        if data.Sell[i]==1:
+            mean=data.Close[i-history:i].pct_change(1).mean()
+            std=data.Close[i-history:i].pct_change(1).std()
+            simulated = [random.gauss(mean,std) for x in range(shots)]
+            simulated.sort(reverse=True)
+            var95 = simulated[int(len(simulated)*0.95)]
+            var99 = simulated[int(len(simulated)*0.99)]
+            var95list.append(var95)
+            var99list.append(var99)
+            closing.append(data.Close[i])
+            tradedate.append(data.Date[i])
+            
+    return_data_dict['var95']=var95list
+    return_data_dict['var99']=var99list
+    return_data_dict['Close']=closing
+    return_data_dict['Date']=tradedate
+    
+    sorted_data=pd.DataFrame(return_data_dict)
+    sorted_data['Date'] = pd.to_datetime(sorted_data['Date'])
+    sorted_data.sort_values(by='Date', ascending = True, inplace = True)
+    sorted_data['ShiftedDate']=sorted_data['Date']+pd.Timedelta(days=profit)
+    #lim_data = lim_data.iloc[:, :3]
+    #lim_data=lim_data.to_dict('list')
+    
+    
+    #df=json.dumps(df)
+    return sorted_data

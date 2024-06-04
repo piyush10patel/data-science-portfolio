@@ -1,0 +1,26 @@
+import json
+import boto3
+
+def either_caller( event ): 
+    return True
+    
+
+def lambda_handler(event, context):
+    body=either_caller( event )
+    if(body):
+        
+        inst_to_terminate=[]
+        
+        ec2_client = boto3.client('ec2', region_name='us-east-1')
+        #ec2_resource=boto3.resource('ec2', region_name='us-east-1')
+        
+        instlist=ec2_client.describe_instances()
+        
+        for ist in instlist['Reservations']:
+            for p in ist['Instances']:
+                inst_to_terminate.append(p['InstanceId'])
+                
+        ec2_client.terminate_instances(InstanceIds=inst_to_terminate)
+        return str(True)
+    else:
+        return str(False)

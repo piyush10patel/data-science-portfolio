@@ -1,0 +1,31 @@
+import json
+import boto3
+
+def either_caller( event ): 
+    body=""
+    try: # if called by function URL and possibly also HTTP API
+        body = json.loads(event['body']) 
+    except KeyError: # if called by Test in Lambda or via API Gateway
+        body = event # dict
+    return body
+    
+
+def lambda_handler(event, context):
+    body=either_caller( event )
+    body_json = json.dumps(body).encode('utf-8')
+    s3_client = boto3.client('s3')
+    try:
+        response_analyse = s3_client.get_object(Bucket='analysedumps', Key='results.json')
+        content =response_analyse['Body'].read().decode('utf-8')
+        content=json.loads(content)
+        list_of_response=[content,body]
+        dump_json=json.dumps(list_of_response)
+        s3_client.put_object(Body=dump_json, Bucket='analysedumps', Key='results.json')
+        
+        
+        response_analyse = s3_client.get_object(Bucket='analysedumps', Key='results.json')
+        content =response_analyse['Body'].read().decode('utf-8')
+        content=json.loads(content)
+        return content
+    except Exception as e:
+        return {'result':e}

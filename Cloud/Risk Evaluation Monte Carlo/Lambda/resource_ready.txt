@@ -1,0 +1,62 @@
+import json
+import boto3
+
+def either_caller( event ): 
+    body=""
+    try: # if called by function URL and possibly also HTTP API
+        body = json.loads(event['body']) 
+    except KeyError: # if called by Test in Lambda or via API Gateway
+        body = event # dict
+    return body
+    
+
+def lambda_handler(event, context):
+    body=either_caller( event )
+    
+    ec2_client = boto3.client('ec2', region_name='us-east-1')
+  
+    try:
+        response = ec2_client.describe_instances()
+        reservations = response['Reservations']
+        instance_states = []
+
+        for reservation in reservations:
+            instances = reservation['Instances']
+            for instance in instances:
+                state = instance['State']['Name']
+                instance_states.append(state)
+        
+        
+        
+        for i in instance_states:
+            if(i!='running'):
+                return{'warm':'False'}
+            else:
+                
+                #return{'warm':'True'}
+                continue
+                
+        return{'warm':'True'}
+      
+                
+                
+            
+        
+        
+        
+    except Exception as e:
+        print(f'Error occurred while retrieving instance states: {e}')
+        return{'warm':'False from exception'}
+    
+    
+    
+    
+    '''ec2 = boto3.client('ec2', region_name='us-east-1')
+    inst_state=[]
+    
+    inst_list=ec2.describe_instances()
+    for ist in inst_list['Reservations']:
+        for p in ist['Instance']:
+            for q in p['State']:
+                inst_state.append(p['Name'])
+    '''
